@@ -294,27 +294,27 @@
   // ================================================================
 
   // Kolejność MUSI być identyczna z kolejnością kolumn w tabeli Excela (patrz Krok 1 planu).
-  // Kolumna "Id" jest dodatkową, techniczną kolumną dopisaną na końcu — jej aplikacja
-  // używa do jednoznacznej identyfikacji wiersza (Excel nie ma trwałych ID wierszy).
-  var EXCEL_COLUMNS = ['tytul','archiwum','opiekunBazy2','identyfikator','imie','nazwisko','kto','urodzony',
-    'wiek','adres','miejscowosc','kodPocztowy','email','telefony','ubezpieczajacy','uwagi','notatki',
-    'pierwszyAgent','opiekun','id'];
+  // Kolumna "ID" jest pierwszą kolumną w tabeli — aplikacja używa jej do jednoznacznej
+  // identyfikacji wiersza (Excel nie ma trwałych ID wierszy poza tym, co sami tam zapiszemy).
+  var EXCEL_COLUMNS = ['id','opiekun','identyfikator','imie','nazwisko','kto','urodzony','wiek',
+    'adres','miejscowosc','kodPocztowy','email','telefony','ubezpieczajacy','uwagi','notatki',
+    'pierwszyAgent'];
   var ID_COL_IDX = EXCEL_COLUMNS.indexOf('id');
   var FIELD_TO_COLIDX = {};
   EXCEL_COLUMNS.forEach(function(f,i){ if(f!=='id') FIELD_TO_COLIDX[f]=i; });
 
   var FIELD_LABELS = {
-    tytul:'Tytuł', archiwum:'Archiwum', opiekunBazy2:'Opiekun bazy2', identyfikator:'Identyfikator',
-    imie:'Imię', nazwisko:'Nazwisko', kto:'Kto', urodzony:'Urodzony', wiek:'Wiek', adres:'Adres',
-    miejscowosc:'Miejscowość', kodPocztowy:'Kod pocztowy', email:'E-mail', telefony:'Telefony',
-    ubezpieczajacy:'Ubezpieczający', uwagi:'Uwagi', notatki:'Notatki', pierwszyAgent:'Pierwszy agent',
-    opiekun:'Opiekun'
+    identyfikator:'Identyfikator', imie:'Imię', nazwisko:'Nazwisko', kto:'Kto', urodzony:'Urodzony',
+    wiek:'Wiek', adres:'Adres', miejscowosc:'Miejscowość', kodPocztowy:'Kod pocztowy', email:'E-mail',
+    telefony:'Telefony', ubezpieczajacy:'Ubezpieczający', uwagi:'Uwagi', notatki:'Notatki',
+    pierwszyAgent:'Pierwszy agent', opiekun:'Opiekun bazy'
   };
   // Kolejność i podział pól widocznych w panelu szczegółów klienta (bez uwagi/notatki — mają własną sekcję)
-  var PANEL_FIELDS = ['imie','nazwisko','tytul','identyfikator','wiek','urodzony','kto','adres',
-    'miejscowosc','kodPocztowy','telefony','email','ubezpieczajacy','opiekun','opiekunBazy2','pierwszyAgent','archiwum'];
+  var PANEL_FIELDS = ['imie','nazwisko','identyfikator','wiek','urodzony','kto','adres',
+    'miejscowosc','kodPocztowy','telefony','email','ubezpieczajacy','opiekun','pierwszyAgent'];
   // Pola dostępne do edycji zbiorczej (zaznacz wielu klientów naraz)
-  var BULK_FIELDS = ['identyfikator','opiekun','opiekunBazy2','pierwszyAgent'];
+  var BULK_FIELDS = ['identyfikator','opiekun','pierwszyAgent'];
+
 
   var GRAPH_SCOPES = ['Sites.ReadWrite.All'];
   var msalInstance = new msal.PublicClientApplication({
@@ -623,7 +623,6 @@
     return (c.imie||'').toLowerCase().indexOf(q)>-1 ||
            (c.nazwisko||'').toLowerCase().indexOf(q)>-1 ||
            (c.opiekun||'').toLowerCase().indexOf(q)>-1 ||
-           (c.opiekunBazy2||'').toLowerCase().indexOf(q)>-1 ||
            (c.pierwszyAgent||'').toLowerCase().indexOf(q)>-1 ||
            (c.telefony||'').toLowerCase().indexOf(q)>-1 ||
            (c.email||'').toLowerCase().indexOf(q)>-1 ||
@@ -759,10 +758,10 @@
     }
 
     var fieldsHtml = PANEL_FIELDS.map(function(f){
-      var listId = ['identyfikator','opiekun','opiekunBazy2','pierwszyAgent'].indexOf(f)>-1 ? (f+'_'+client.id) : null;
+      var listId = ['identyfikator','opiekun','pierwszyAgent'].indexOf(f)>-1 ? (f+'_'+client.id) : null;
       return field(f, FIELD_LABELS[f], client[f], client.id, 'text', listId);
     }).join('');
-    var datalistsHtml = ['identyfikator','opiekun','opiekunBazy2','pierwszyAgent'].map(function(f){
+    var datalistsHtml = ['identyfikator','opiekun','pierwszyAgent'].map(function(f){
       return '<datalist id="'+f+'_'+client.id+'">'+dl(f)+'</datalist>';
     }).join('');
 
