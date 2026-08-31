@@ -258,6 +258,10 @@
   </div>
 </div>
 
+<div class="modal-overlay" id="noteModalOverlay">
+  <div class="modal-box" id="noteModalBox" style="max-width:460px;"></div>
+</div>
+
 <div class="modal-overlay" id="bulkModalOverlay">
   <div class="modal-box" id="bulkModalBox"></div>
 </div>
@@ -419,22 +423,39 @@
     return res.json();
   }
 
+  // Sesja arkusza (workbook-session-id) może w każdej chwili wygasnąć lub stać się nieważna
+  // z przyczyn przejściowych po stronie Excel Online — Graph API zgłasza to na różne sposoby
+  // (np. "ItemNotFound", "InvalidSession", "invalidSessionReCreatable"). Rozpoznajemy je
+  // wszystkie w jednym miejscu, żeby konsekwentnie odtwarzać sesję i ponawiać operację.
+  function isInvalidSessionError(e){
+    var msg = String((e && e.message) || e || '');
+    return msg.indexOf('ItemNotFound')>-1 ||
+           msg.indexOf('InvalidSession')>-1 ||
+           msg.indexOf('invalidSessionReCreatable')>-1;
+  }
+
+  // Uruchamia fn(); jeśli fn rzuci błąd wygasłej/nieważnej sesji, odtwarza sesję i ponawia raz.
+  async function withSessionRetry(fn){
+    try{
+      return await fn();
+    }catch(e){
+      if(isInvalidSessionError(e)){
+        WORKBOOK_SESSION_ID = null;
+        await ensureWorkbookSession();
+        return await fn();
+      }
+      throw e;
+    }
+  }
+
   // wbFetch = zapytanie do arkusza w kontekście sesji workbooka; jeśli sesja wygasła, tworzy nową i ponawia raz
   async function wbFetch(path, options){
     await ensureWorkbookSession();
     options = options || {};
-    var headers = Object.assign({ 'workbook-session-id': WORKBOOK_SESSION_ID }, options.headers||{});
-    try{
+    return await withSessionRetry(async function(){
+      var headers = Object.assign({ 'workbook-session-id': WORKBOOK_SESSION_ID }, options.headers||{});
       return await graphFetch(path, Object.assign({}, options, {headers:headers}));
-    }catch(e){
-      if(String(e.message).indexOf('ItemNotFound')>-1 || String(e.message).indexOf('440')>-1){
-        WORKBOOK_SESSION_ID = null;
-        await ensureWorkbookSession();
-        headers['workbook-session-id'] = WORKBOOK_SESSION_ID;
-        return await graphFetch(path, Object.assign({}, options, {headers:headers}));
-      }
-      throw e;
-    }
+    });
   }
 
   function tableRowsUrl(){ return workbookPath()+"/tables('"+CONFIG.TABLE_NAME+"')/rows"; }
@@ -483,17 +504,22 @@
 
   async function fetchAllTableRows(){
     await ensureWorkbookSession();
-    var out = [];
-    var url = 'https://graph.microsoft.com/v1.0'+tableRowsUrl();
-    while(url){
-      var token = await getAccessToken();
-      var res = await fetch(url, { headers: { 'Authorization':'Bearer '+token, 'workbook-session-id':WORKBOOK_SESSION_ID } });
-      if(!res.ok) throw new Error('Graph API '+res.status+': '+(await res.text()));
-      var data = await res.json();
-      out = out.concat(data.value||[]);
-      url = data['@odata.nextLink'] || null;
-    }
-    return out;
+    return await withSessionRetry(async function(){
+      var out = [];
+      var url = 'https://graph.microsoft.com/v1.0'+tableRowsUrl();
+      while(url){
+        var token = await getAccessToken();
+        var res = await fetch(url, { headers: { 'Authorization':'Bearer '+token, 'workbook-session-id':WORKBOOK_SESSION_ID } });
+        if(!res.ok){
+          var txt = await res.text();
+          throw new Error('Graph API '+res.status+': '+txt);
+        }
+        var data = await res.json();
+        out = out.concat(data.value||[]);
+        url = data['@odata.nextLink'] || null;
+      }
+      return out;
+    });
   }
 
   // Wiersze tabel Excela nie mają trwałego ID (tylko zmienny index) — dlatego każdy rekord
@@ -549,10 +575,10 @@
   }
   // Dopisuje datowaną linię tekstu do pola notatki/uwagi (zamiast osobnych wpisów jak w liście SharePoint —
   // tu to zwykła komórka tekstowa) i zapisuje w Excelu. Zwraca starą/nową wartość na potrzeby "Cofnij".
-  async function appendNoteText(clientId, field, text){
+  async function appendNoteText(clientId, field, text, dateISO){
     var c = getClient(clientId);
     if(!c) throw new Error('Nie znaleziono klienta');
-    var line = '['+formatDate(todayISO())+'] '+text;
+    var line = '['+formatDate(dateISO || todayISO())+'] '+text;
     var oldValue = c[field] || '';
     var newValue = oldValue ? (oldValue + '\n' + line) : line;
     await apiUpdateClientField(clientId, field, newValue);
@@ -796,11 +822,8 @@
     return '<div class="notes-col '+extraClass+'">'+
       '<h3>'+label+'</h3>'+
       '<textarea class="note-fulltext" data-field="'+field+'" data-client="'+client.id+'" '+(state.editMode?'':'disabled')+'>'+escapeHtml(text)+'</textarea>'+
-      '<div class="note-form">'+
-        '<textarea rows="1" data-role="quick-note-input" data-client="'+client.id+'" data-field="'+field+'" placeholder="Szybko dopisz wpis (z datą)…"></textarea>'+
-        '<button class="btn btn-primary btn-sm" data-action="quick-add-note" data-client="'+client.id+'" data-field="'+field+'">Dodaj</button>'+
-      '</div>'+
-      '<div class="note-hint">Szybkie dopisywanie dodaje nową, datowaną linię niezależnie od trybu edycji. Pole powyżej możesz też edytować ręcznie po kliknięciu „Edytuj dane”.</div>'+
+      '<button class="btn btn-primary btn-sm" data-action="open-note-modal" data-client="'+client.id+'" data-field="'+field+'">+ Dodaj wpis</button>'+
+      '<div class="note-hint">Dodawanie wpisu działa niezależnie od trybu edycji i pozwala wybrać datę wpisu. Pole powyżej możesz też edytować ręcznie po kliknięciu „Edytuj dane”.</div>'+
     '</div>';
   }
 
@@ -919,6 +942,7 @@
               '<label><input type="radio" name="bulkNoteType" value="notatki" checked> Notatka</label>'+
               '<label><input type="radio" name="bulkNoteType" value="uwagi"> Uwaga</label>'+
             '</div>'+
+            '<input type="date" id="bulkNoteDate" value="'+todayISO()+'" style="font-family:var(--mono);font-size:12.5px;padding:8px;border:1px solid var(--line-strong);border-radius:7px;">'+
           '</div>'+
           '<textarea id="bulkNoteText" placeholder="Treść wpisu…"></textarea>'+
           '<div style="display:flex;justify-content:flex-end;">'+
@@ -1021,16 +1045,47 @@
     });
   }
 
-  async function quickAddNote(clientId, field){
-    var input = document.querySelector('[data-role="quick-note-input"][data-client="'+clientId+'"][data-field="'+field+'"]');
-    if(!input) return;
-    var text = input.value.trim();
-    if(!text){ input.focus(); return; }
+  function openNoteModal(clientId, field){
+    var box = document.getElementById('noteModalBox');
+    var overlay = document.getElementById('noteModalOverlay');
+    var titleLabel = field==='notatki' ? 'Dodaj notatkę' : 'Dodaj uwagę';
+    var placeholderLabel = field==='notatki' ? 'notatki' : 'uwagi';
+    box.innerHTML =
+      '<div class="modal-head"><h3>'+titleLabel+'</h3>'+
+        '<button class="panel-close" data-action="close-note-modal" title="Zamknij">✕</button></div>'+
+      '<div class="modal-body">'+
+        '<div class="field" style="margin-bottom:16px;">'+
+          '<label>Data</label>'+
+          '<input type="date" id="noteModalDate" value="'+todayISO()+'">'+
+        '</div>'+
+        '<div class="field">'+
+          '<label>Treść</label>'+
+          '<textarea id="noteModalText" placeholder="Wpisz treść '+placeholderLabel+'…" style="width:100%;min-height:110px;padding:9px 11px;border:1px solid var(--line-strong);border-radius:7px;font-family:var(--sans);font-size:13.5px;resize:vertical;"></textarea>'+
+        '</div>'+
+      '</div>'+
+      '<div class="modal-footer">'+
+        '<button class="btn btn-ghost btn-sm" data-action="close-note-modal">Anuluj</button>'+
+        '<button class="btn btn-primary btn-sm" data-action="save-note-modal" data-client="'+clientId+'" data-field="'+field+'">Dodaj</button>'+
+      '</div>';
+    overlay.classList.add('show');
+    setTimeout(function(){ var t=document.getElementById('noteModalText'); if(t) t.focus(); }, 50);
+  }
+
+  function closeNoteModal(){
+    document.getElementById('noteModalOverlay').classList.remove('show');
+  }
+
+  async function saveNoteModal(clientId, field){
+    var dateInput = document.getElementById('noteModalDate');
+    var textEl = document.getElementById('noteModalText');
+    var date = (dateInput && dateInput.value) || todayISO();
+    var text = textEl.value.trim();
+    if(!text){ textEl.focus(); return; }
     try{
-      var res = await appendNoteText(clientId, field, text);
-      input.value='';
+      var res = await appendNoteText(clientId, field, text, date);
       var c = getClient(clientId);
       logAction('field-update', (FIELD_LABELS[field]||field)+' — dopisano wpis dla '+clientLabel(c), {clientId:clientId, field:field, oldValue:res.oldValue, newValue:res.newValue});
+      closeNoteModal();
       render();
     }catch(e){ console.error(e); showToast('Nie udało się zapisać wpisu w pliku Excel'); }
   }
@@ -1102,6 +1157,8 @@
   async function applyBulkNote(){
     var box = document.getElementById('bulkModalBox');
     var noteType = box.querySelector('input[name="bulkNoteType"]:checked').value; // 'notatki' lub 'uwagi'
+    var dateEl = box.querySelector('#bulkNoteDate');
+    var date = (dateEl && dateEl.value) || todayISO();
     var textEl = box.querySelector('#bulkNoteText');
     var text = textEl.value.trim();
     if(!text){ textEl.focus(); return; }
@@ -1112,7 +1169,7 @@
       var c = getClient(ids[i]);
       if(!c) continue;
       try{
-        var res = await appendNoteText(c.id, noteType, text);
+        var res = await appendNoteText(c.id, noteType, text, date);
         changes.push({clientId:c.id, field:noteType, oldValue:res.oldValue, newValue:res.newValue});
       }catch(e){ console.error(e); showToast('Błąd zapisu wpisu dla '+clientLabel(c)); }
     }
@@ -1193,6 +1250,9 @@
   document.getElementById('bulkModalOverlay').addEventListener('click', function(e){
     if(e.target.id==='bulkModalOverlay'){ closeBulkModal(); }
   });
+  document.getElementById('noteModalOverlay').addEventListener('click', function(e){
+    if(e.target.id==='noteModalOverlay'){ closeNoteModal(); }
+  });
 
   document.getElementById('searchInput').addEventListener('input', function(e){
     state.search = e.target.value;
@@ -1220,7 +1280,9 @@
     if(action==='close-panel'){ state.selectedId=null; state.editMode=false; render(); }
     else if(action==='toggle-edit'){ toggleEdit(); }
     else if(action==='delete-client'){ deleteClient(actionEl.getAttribute('data-client')); }
-    else if(action==='quick-add-note'){ quickAddNote(actionEl.getAttribute('data-client'), actionEl.getAttribute('data-field')); }
+    else if(action==='open-note-modal'){ openNoteModal(actionEl.getAttribute('data-client'), actionEl.getAttribute('data-field')); }
+    else if(action==='close-note-modal'){ closeNoteModal(); }
+    else if(action==='save-note-modal'){ saveNoteModal(actionEl.getAttribute('data-client'), actionEl.getAttribute('data-field')); }
     else if(action==='clear-selection'){ clearSelection(); }
     else if(action==='open-bulk-modal'){ state.bulkModalOpen=true; renderBulkModal(); }
     else if(action==='close-bulk-modal'){ closeBulkModal(); }
@@ -1245,15 +1307,11 @@
   });
 
   document.body.addEventListener('keydown', function(e){
-    var t = e.target;
-    if(t.matches('[data-role="quick-note-input"]') && e.key==='Enter' && !e.shiftKey){
-      e.preventDefault();
-      var btn = document.querySelector('[data-action="quick-add-note"][data-client="'+t.getAttribute('data-client')+'"][data-field="'+t.getAttribute('data-field')+'"]');
-      if(btn) btn.click();
-    }
     if(e.key==='Escape'){
       if(state.historyOpen){ state.historyOpen=false; renderHistory(); }
       if(state.bulkModalOpen){ closeBulkModal(); }
+      var noteOverlay = document.getElementById('noteModalOverlay');
+      if(noteOverlay.classList.contains('show')) closeNoteModal();
     }
   });
 
