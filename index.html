@@ -194,6 +194,8 @@
   .auth-error{margin-top:14px;font-size:12px;color:var(--red);}
   .sync-badge{font-family:var(--mono);font-size:11px;color:var(--ink-faint);display:flex;align-items:center;gap:6px;}
   .sync-dot{width:7px;height:7px;border-radius:50%;background:var(--teal);}
+
+  #configWarning{background:var(--amber-soft);border:1px solid #EEDBB8;color:#7a5420;border-radius:10px;padding:12px 16px;margin-bottom:14px;font-size:12.5px;line-height:1.6;}
 </style>
 </head>
 <body>
@@ -207,11 +209,12 @@
     <div style="display:flex;gap:8px;align-items:center;">
       <span class="sync-badge" id="syncBadge"><span class="sync-dot"></span>Excel / SharePoint</span>
       <button class="btn btn-ghost" id="historyBtn">Historia zmian</button>
-      <button class="btn btn-ghost" id="seedDataBtn">Wczytaj dane przykładowe</button>
       <button class="btn btn-primary" id="addClientBtn">+ Nowy klient</button>
       <button class="btn btn-ghost" id="logoutBtn" title="Wyloguj">Wyloguj</button>
     </div>
   </div>
+
+  <div id="configWarning" style="display:none;"></div>
 
   <div id="bulkBarWrap"></div>
 
@@ -406,6 +409,31 @@
 
   function tableRowsUrl(){ return workbookPath()+"/tables('"+CONFIG.TABLE_NAME+"')/rows"; }
 
+  // Sprawdza, czy tabela Excela ma dokładnie tyle kolumn, ile oczekuje aplikacja.
+  // Rozjazd (np. brakująca kolumna "Id" poza zakresem tabeli) to najczęstsza przyczyna
+  // błędu "Graph API 400" przy dodawaniu/aktualizacji wierszy — ten komunikat wyjaśnia
+  // dokładnie, co jest nie tak, zamiast czekać na kryptyczny błąd Graph API.
+  async function checkTableShape(){
+    var warnBox = document.getElementById('configWarning');
+    try{
+      var data = await wbFetch(workbookPath()+"/tables('"+CONFIG.TABLE_NAME+"')/columns");
+      var actualCols = (data.value||[]).map(function(c){ return c.name; });
+      if(actualCols.length !== EXCEL_COLUMNS.length){
+        warnBox.innerHTML = '⚠️ Tabela „'+CONFIG.TABLE_NAME+'" w Excelu ma <b>'+actualCols.length+'</b> kolumn, '+
+          'a aplikacja oczekuje <b>'+EXCEL_COLUMNS.length+'</b> (19 pól + kolumna „Id" na końcu). '+
+          'To najpewniejsza przyczyna błędów przy dodawaniu/edycji klientów — sprawdź w Excelu, czy '+
+          'niebieski zakres tabeli obejmuje wszystkie kolumny łącznie z „Id" (Projektowanie tabeli → uchwyt '+
+          'w prawym dolnym rogu tabeli, przeciągnij tak, aby objął kolumnę „Id").'+
+          '<br><span style="font-family:var(--mono);font-size:11px;">Kolumny w Excelu: '+actualCols.join(', ')+'</span>';
+        warnBox.style.display = 'block';
+      }else{
+        warnBox.style.display = 'none';
+      }
+    }catch(e){
+      console.error('Nie udało się sprawdzić struktury tabeli', e);
+    }
+  }
+
   async function fetchAllTableRows(){
     await ensureWorkbookSession();
     var out = [];
@@ -549,6 +577,7 @@
       await ensureSiteId();
       await ensureWorkbookItemId();
       await ensureWorkbookSession();
+      await checkTableShape();
       var rows = await fetchAllTableRows();
       state.clients = rows.map(function(r){ return rowToClient(r.values[0]); });
     }catch(e){
@@ -950,60 +979,6 @@
     }catch(e){ console.error(e); showToast('Nie udało się zapisać wpisu w pliku Excel'); }
   }
 
-  function sampleClients(){
-    var d = function(offsetDays){
-      var dt = new Date(); dt.setDate(dt.getDate()-offsetDays);
-      return dt.toISOString().slice(0,10);
-    };
-    function mk(vals){
-      var c = { id: uid('c') };
-      EXCEL_COLUMNS.forEach(function(f){ if(f!=='id') c[f] = vals[f] || ''; });
-      return c;
-    }
-    return [
-      mk({ imie:'Anna', nazwisko:'Kowalska', wiek:'34', identyfikator:'KOWALSCY-01', opiekun:'Marta Nowicka',
-        pierwszyAgent:'Piotr Zieliński', telefony:'600 111 222', email:'anna.kowalska@example.com',
-        miejscowosc:'Warszawa', adres:'ul. Lipowa 4', kodPocztowy:'00-001',
-        notatki:'['+formatDate(d(2))+'] Klientka zainteresowana rozszerzeniem polisy o ochronę zdrowotną dla dziecka.\n['+formatDate(d(20))+'] Podpisano aneks do umowy — zmiana danych kontaktowych.',
-        uwagi:'['+formatDate(d(2))+'] Preferuje kontakt telefoniczny po godzinie 17:00.' }),
-      mk({ imie:'Tomasz', nazwisko:'Kowalski', wiek:'37', identyfikator:'KOWALSCY-01', opiekun:'Marta Nowicka',
-        pierwszyAgent:'Piotr Zieliński', telefony:'600 111 223', miejscowosc:'Warszawa',
-        notatki:'['+formatDate(d(15))+'] Zapytanie o możliwość dołączenia rodzica do pakietu rodzinnego.' }),
-      mk({ imie:'Julia', nazwisko:'Kowalska', wiek:'8', identyfikator:'KOWALSCY-01', opiekun:'Marta Nowicka',
-        pierwszyAgent:'Piotr Zieliński', kto:'córka', miejscowosc:'Warszawa',
-        uwagi:'['+formatDate(d(30))+'] Dziecko objęte polisą rodziców — brak własnej umowy.' }),
-      mk({ imie:'Michał', nazwisko:'Wiśniewski', wiek:'52', opiekun:'Karol Baran', pierwszyAgent:'Karol Baran',
-        telefony:'601 222 333', email:'michal.wisniewski@example.com', miejscowosc:'Kraków',
-        notatki:'['+formatDate(d(1))+'] Klient prosi o przygotowanie oferty na przyszły rok — porównanie wariantów.\n['+formatDate(d(45))+'] Rozmowa telefoniczna: potwierdzono aktualność danych osobowych.',
-        uwagi:'['+formatDate(d(10))+'] Klient bywa trudno dostępny w tygodniu — najlepiej dzwonić w weekendy.' }),
-      mk({ imie:'Adam', nazwisko:'Nowak', wiek:'61', identyfikator:'NOWAK-07', opiekun:'Karol Baran',
-        pierwszyAgent:'Marta Nowicka', telefony:'602 333 444', miejscowosc:'Poznań',
-        notatki:'['+formatDate(d(5))+'] Umówiono spotkanie w oddziale na przegląd portfela polis.',
-        uwagi:'['+formatDate(d(5))+'] Klient VIP — priorytetowa obsługa, osobisty opiekun.' })
-    ];
-  }
-
-  function seedData(){
-    showConfirm('To doda 5 przykładowych klientów do pliku Excel (obok istniejących danych). Kontynuować?', async function(){
-      var samples = sampleClients();
-      var createdIds = [];
-      for(var i=0;i<samples.length;i++){
-        var s = samples[i];
-        try{
-          var newId = await apiCreateClient(s);
-          s.id = newId;
-          createdIds.push(newId);
-          state.clients.push(s);
-        }catch(e){ console.error(e); showToast('Błąd dodawania przykładowego klienta'); }
-      }
-      if(createdIds.length){
-        logAction('seed-add', 'Wczytano dane przykładowe ('+createdIds.length+' klientów)', {clientIds:createdIds});
-      }
-      render();
-      showToast('Dodano przykładowych klientów');
-    }, 'Dodaj');
-  }
-
   // ---- bulk selection ----
   function toggleRowSelect(id){
     if(state.selectedIds.has(id)) state.selectedIds.delete(id); else state.selectedIds.add(id);
@@ -1154,7 +1129,6 @@
 
   // ---- events ----
   document.getElementById('addClientBtn').addEventListener('click', addClient);
-  document.getElementById('seedDataBtn').addEventListener('click', seedData);
   document.getElementById('historyBtn').addEventListener('click', function(){ state.historyOpen=true; renderHistory(); });
   document.getElementById('historyCloseBtn').addEventListener('click', function(){ state.historyOpen=false; renderHistory(); });
   document.getElementById('historyModalOverlay').addEventListener('click', function(e){
@@ -1238,9 +1212,25 @@
     document.getElementById('authGate').style.display = 'flex';
   }
 
+  // MSAL czasem nie czyści poprawnie swojej wewnętrznej flagi "trwa logowanie/wylogowywanie"
+  // (np. gdy okienko popup zostanie zamknięte w nietypowy sposób) — wtedy kolejna próba
+  // logowania/wylogowania kończy się błędem "interaction_in_progress", mimo że nic faktycznie
+  // się nie dzieje. Czyścimy tę flagę ręcznie przed każdą interaktywną operacją, na wszelki wypadek.
+  function clearStuckMsalInteraction(){
+    try{
+      Object.keys(localStorage).forEach(function(k){
+        if(k.indexOf('interaction.status')>-1) localStorage.removeItem(k);
+      });
+      Object.keys(sessionStorage).forEach(function(k){
+        if(k.indexOf('interaction.status')>-1) sessionStorage.removeItem(k);
+      });
+    }catch(e){ console.error(e); }
+  }
+
   document.getElementById('loginBtn').addEventListener('click', async function(){
     var errBox = document.getElementById('authError');
     errBox.textContent = '';
+    clearStuckMsalInteraction();
     try{
       var result = await msalInstance.loginPopup({ scopes: GRAPH_SCOPES });
       currentAccount = result.account;
@@ -1248,11 +1238,35 @@
     }catch(e){
       console.error(e);
       errBox.textContent = 'Logowanie nie powiodło się. Sprawdź konfigurację CONFIG (MSAL_CLIENT_ID, MSAL_TENANT_ID) i konsolę przeglądarki.';
+    }finally{
+      clearStuckMsalInteraction();
     }
   });
 
   document.getElementById('logoutBtn').addEventListener('click', function(){
-    msalInstance.logoutRedirect({ account: currentAccount });
+    showConfirm('Czy na pewno chcesz wylogować się ze swojego konta Microsoft?', async function(){
+      clearStuckMsalInteraction();
+      try{
+        await msalInstance.logoutPopup({ account: currentAccount });
+      }catch(e){
+        console.error(e);
+        // nawet jeśli popup wylogowania Microsoft się nie powiódł (np. zablokowany przez przeglądarkę),
+        // i tak wylogowujemy lokalnie, żeby użytkownik nie utknął w aplikacji
+      }finally{
+        clearStuckMsalInteraction();
+      }
+      currentAccount = null;
+      SITE_ID = null;
+      WORKBOOK_ITEM_ID = null;
+      WORKBOOK_SESSION_ID = null;
+      state.clients = [];
+      state.selectedId = null;
+      state.editMode = false;
+      state.selectedIds = new Set();
+      state.loaded = false;
+      document.getElementById('configWarning').style.display = 'none';
+      showAuthGate();
+    }, 'Wyloguj');
   });
 
   (function init(){
