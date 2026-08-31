@@ -293,15 +293,44 @@
   };
   // ================================================================
 
-  // Kolejność MUSI być identyczna z kolejnością kolumn w tabeli Excela (patrz Krok 1 planu).
-  // Kolumna "ID" jest pierwszą kolumną w tabeli — aplikacja używa jej do jednoznacznej
-  // identyfikacji wiersza (Excel nie ma trwałych ID wierszy poza tym, co sami tam zapiszemy).
+  // Aplikacja NIE zakłada już konkretnej kolejności kolumn w Excelu — zamiast tego, przy
+  // każdym wczytaniu, odczytuje faktyczne nazwy nagłówków z tabeli i dopasowuje je do pól
+  // aplikacji po nazwie (patrz HEADER_NAME_MAP i ensureColumnMapping niżej). Dzięki temu
+  // kolejność kolumn w Excelu może być dowolna — liczy się tylko nazwa nagłówka.
   var EXCEL_COLUMNS = ['id','opiekun','identyfikator','imie','nazwisko','kto','urodzony','wiek',
     'adres','miejscowosc','kodPocztowy','email','telefony','ubezpieczajacy','uwagi','notatki',
     'pierwszyAgent'];
-  var ID_COL_IDX = EXCEL_COLUMNS.indexOf('id');
-  var FIELD_TO_COLIDX = {};
-  EXCEL_COLUMNS.forEach(function(f,i){ if(f!=='id') FIELD_TO_COLIDX[f]=i; });
+
+  // Mapowanie: dokładna nazwa nagłówka kolumny w Excelu (pisownia dowolna wielkością liter,
+  // białe znaki na początku/końcu ignorowane) -> nazwa pola używana w aplikacji.
+  // Jeśli zmienisz nazwę nagłówka w Excelu, dopisz tu odpowiadający wpis.
+  var HEADER_NAME_MAP = {
+    'id': 'id',
+    'opiekun bazy': 'opiekun',
+    'identyfikator': 'identyfikator',
+    'imię': 'imie',
+    'imie': 'imie',
+    'nazwisko': 'nazwisko',
+    'kto': 'kto',
+    'urodzony': 'urodzony',
+    'wiek': 'wiek',
+    'adres': 'adres',
+    'miejscowość': 'miejscowosc',
+    'miejscowosc': 'miejscowosc',
+    'kod pocztowy': 'kodPocztowy',
+    'kodpocztowy': 'kodPocztowy',
+    'e-mail': 'email',
+    'email': 'email',
+    'telefony': 'telefony',
+    'ubezpieczający': 'ubezpieczajacy',
+    'ubezpieczajacy': 'ubezpieczajacy',
+    'uwagi': 'uwagi',
+    'notatki': 'notatki',
+    'pierwszy agent': 'pierwszyAgent'
+  };
+  function normalizeHeader(s){
+    return String(s||'').trim().toLowerCase().replace(/\s+/g,' ');
+  }
 
   var FIELD_LABELS = {
     identyfikator:'Identyfikator', imie:'Imię', nazwisko:'Nazwisko', kto:'Kto', urodzony:'Urodzony',
@@ -314,6 +343,7 @@
     'miejscowosc','kodPocztowy','telefony','email','ubezpieczajacy','opiekun','pierwszyAgent'];
   // Pola dostępne do edycji zbiorczej (zaznacz wielu klientów naraz)
   var BULK_FIELDS = ['identyfikator','opiekun','pierwszyAgent'];
+
 
 
   var GRAPH_SCOPES = ['Sites.ReadWrite.All'];
@@ -409,30 +439,47 @@
 
   function tableRowsUrl(){ return workbookPath()+"/tables('"+CONFIG.TABLE_NAME+"')/rows"; }
 
-  // Sprawdza, czy tabela Excela ma dokładnie tyle kolumn, ile oczekuje aplikacja.
-  // Rozjazd (np. brakująca kolumna "Id" poza zakresem tabeli) to najczęstsza przyczyna
-  // błędu "Graph API 400" przy dodawaniu/aktualizacji wierszy — ten komunikat wyjaśnia
-  // dokładnie, co jest nie tak, zamiast czekać na kryptyczny błąd Graph API.
-  async function checkTableShape(){
+  // Dynamicznie odczytuje faktyczne nazwy nagłówków kolumn z tabeli Excela i buduje mapowanie
+  // nazwa-pola -> aktualny numer kolumny (COLUMN_INDEX). Dzięki temu kolejność kolumn w Excelu
+  // może być dowolna — kluczowe są tylko same nazwy nagłówków (patrz HEADER_NAME_MAP).
+  // Wywoływane raz na sesję; wynik jest cache'owany w COLUMN_INDEX/TOTAL_COLUMN_COUNT.
+  var COLUMN_INDEX = null; // fieldKey -> numer kolumny w tabeli (0-indeksowany)
+  var TOTAL_COLUMN_COUNT = 0;
+
+  async function ensureColumnMapping(){
+    if(COLUMN_INDEX) return COLUMN_INDEX;
     var warnBox = document.getElementById('configWarning');
-    try{
-      var data = await wbFetch(workbookPath()+"/tables('"+CONFIG.TABLE_NAME+"')/columns");
-      var actualCols = (data.value||[]).map(function(c){ return c.name; });
-      if(actualCols.length !== EXCEL_COLUMNS.length){
-        warnBox.innerHTML = '⚠️ Tabela „'+CONFIG.TABLE_NAME+'" w Excelu ma <b>'+actualCols.length+'</b> kolumn, '+
-          'a aplikacja oczekuje <b>'+EXCEL_COLUMNS.length+'</b> (19 pól + kolumna „Id" na końcu). '+
-          'To najpewniejsza przyczyna błędów przy dodawaniu/edycji klientów — sprawdź w Excelu, czy '+
-          'niebieski zakres tabeli obejmuje wszystkie kolumny łącznie z „Id" (Projektowanie tabeli → uchwyt '+
-          'w prawym dolnym rogu tabeli, przeciągnij tak, aby objął kolumnę „Id").'+
-          '<br><span style="font-family:var(--mono);font-size:11px;">Kolumny w Excelu: '+actualCols.join(', ')+'</span>';
-        warnBox.style.display = 'block';
-      }else{
-        warnBox.style.display = 'none';
-      }
-    }catch(e){
-      console.error('Nie udało się sprawdzić struktury tabeli', e);
+    var data = await wbFetch(workbookPath()+"/tables('"+CONFIG.TABLE_NAME+"')/columns");
+    var cols = data.value || [];
+    TOTAL_COLUMN_COUNT = cols.length;
+    var map = {};
+    var foundHeaders = [];
+    cols.forEach(function(col){
+      foundHeaders.push(col.name);
+      var field = HEADER_NAME_MAP[normalizeHeader(col.name)];
+      if(field) map[field] = col.index;
+    });
+    COLUMN_INDEX = map;
+
+    // walidacja: sprawdź, czy wszystkie oczekiwane pola (w tym "id") zostały znalezione
+    var expectedFields = Object.keys(HEADER_NAME_MAP).map(function(k){ return HEADER_NAME_MAP[k]; })
+      .filter(function(f,i,arr){ return arr.indexOf(f)===i; });
+    var missing = expectedFields.filter(function(f){ return !(f in map); });
+    if(missing.length){
+      var missingHeaders = missing.map(function(f){
+        for(var k in HEADER_NAME_MAP){ if(HEADER_NAME_MAP[k]===f) return k; }
+        return f;
+      });
+      warnBox.innerHTML = '⚠️ Nie znaleziono w tabeli „'+CONFIG.TABLE_NAME+'" kolumn odpowiadających polom: <b>'+
+        missingHeaders.join(', ')+'</b>. Sprawdź, czy nazwy nagłówków w Excelu dokładnie odpowiadają oczekiwanym.'+
+        '<br><span style="font-family:var(--mono);font-size:11px;">Kolumny znalezione w Excelu: '+foundHeaders.join(', ')+'</span>';
+      warnBox.style.display = 'block';
+    }else{
+      warnBox.style.display = 'none';
     }
+    return COLUMN_INDEX;
   }
+
 
   async function fetchAllTableRows(){
     await ensureWorkbookSession();
@@ -453,36 +500,46 @@
   // trzyma własny GUID w kolumnie "Id", a przed każdą aktualizacją/usunięciem szukamy
   // aktualnego indeksu wiersza po tym GUID-zie.
   async function getRowByEntityId(id){
+    await ensureColumnMapping();
     var rows = await fetchAllTableRows();
     for(var i=0;i<rows.length;i++){
-      if(String(rows[i].values[0][ID_COL_IDX])===String(id)) return rows[i];
+      if(String(rows[i].values[0][COLUMN_INDEX['id']])===String(id)) return rows[i];
     }
     return null;
   }
 
   // ---- mapowanie: wiersz tabeli Excel <-> obiekt klienta w aplikacji ----
+  // Oba kierunki opierają się na COLUMN_INDEX (nazwa pola -> aktualny numer kolumny w Excelu),
+  // wypełnianym dynamicznie przez ensureColumnMapping() na podstawie faktycznych nagłówków.
   function clientToRowValues(c){
-    return [ EXCEL_COLUMNS.map(function(f){ return f==='id' ? (c.id||'') : (c[f]||''); }) ];
+    var arr = new Array(TOTAL_COLUMN_COUNT).fill('');
+    Object.keys(COLUMN_INDEX).forEach(function(field){
+      arr[COLUMN_INDEX[field]] = field==='id' ? (c.id||'') : (c[field]||'');
+    });
+    return [arr];
   }
   function rowToClient(v){
     var c = {};
-    EXCEL_COLUMNS.forEach(function(f,i){
-      c[f] = v[i]!=null ? String(v[i]) : '';
+    Object.keys(COLUMN_INDEX).forEach(function(field){
+      var idx = COLUMN_INDEX[field];
+      c[field] = v[idx]!=null ? String(v[idx]) : '';
     });
     return c;
   }
 
   // ---- CRUD na tabeli Excela ----
   async function apiCreateClient(c){
+    await ensureColumnMapping();
     c.id = c.id || uid('c');
     await wbFetch(tableRowsUrl(), {method:'POST', body: JSON.stringify({values: clientToRowValues(c)})});
     return c.id;
   }
   async function apiUpdateClientField(clientId, field, value){
+    await ensureColumnMapping();
     var row = await getRowByEntityId(clientId);
     if(!row) throw new Error('Nie znaleziono klienta w arkuszu (Id='+clientId+')');
     var vals = row.values[0].slice();
-    vals[FIELD_TO_COLIDX[field]] = value;
+    vals[COLUMN_INDEX[field]] = value;
     await wbFetch(tableRowsUrl()+'/itemAt(index='+row.index+')', {method:'PATCH', body: JSON.stringify({values:[vals]})});
   }
   async function apiDeleteClient(clientId){
@@ -577,7 +634,7 @@
       await ensureSiteId();
       await ensureWorkbookItemId();
       await ensureWorkbookSession();
-      await checkTableShape();
+      await ensureColumnMapping();
       var rows = await fetchAllTableRows();
       state.clients = rows.map(function(r){ return rowToClient(r.values[0]); });
     }catch(e){
@@ -1258,6 +1315,8 @@
       SITE_ID = null;
       WORKBOOK_ITEM_ID = null;
       WORKBOOK_SESSION_ID = null;
+      COLUMN_INDEX = null;
+      TOTAL_COLUMN_COUNT = 0;
       state.clients = [];
       state.selectedId = null;
       state.editMode = false;
