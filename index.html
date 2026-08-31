@@ -208,6 +208,7 @@
     </div>
     <div style="display:flex;gap:8px;align-items:center;">
       <span class="sync-badge" id="syncBadge"><span class="sync-dot"></span>Excel / SharePoint</span>
+      <button class="btn btn-ghost" id="refreshBtn" title="Wczytaj ponownie dane z Excela (np. po zmianach zrobionych bezpośrednio w pliku)">⟳ Odśwież</button>
       <button class="btn btn-ghost" id="historyBtn">Historia zmian</button>
       <button class="btn btn-primary" id="addClientBtn">+ Nowy klient</button>
       <button class="btn btn-ghost" id="logoutBtn" title="Wyloguj">Wyloguj</button>
@@ -433,18 +434,38 @@
            msg.indexOf('InvalidSession')>-1 ||
            msg.indexOf('invalidSessionReCreatable')>-1;
   }
+  // "InsertDeleteConflict" pojawia się, gdy Excel nie może przesunąć komórek w tabeli — zwykle
+  // dlatego, że plik jest w tej samej chwili otwarty w innym oknie/karcie Excela (zwłaszcza
+  // z aktywnym filtrem), albo jest to chwilowa, przejściowa kolizja. W obu przypadkach krótkie
+  // odczekanie i ponowna próba zwykle rozwiązuje sprawę.
+  function isConflictError(e){
+    var msg = String((e && e.message) || e || '');
+    return msg.indexOf('InsertDeleteConflict')>-1 || msg.indexOf('insertDeleteConflict')>-1;
+  }
+  function sleep(ms){ return new Promise(function(res){ setTimeout(res, ms); }); }
 
-  // Uruchamia fn(); jeśli fn rzuci błąd wygasłej/nieważnej sesji, odtwarza sesję i ponawia raz.
+  // Uruchamia fn(); przy wygasłej sesji odtwarza ją i ponawia od razu (raz); przy konflikcie
+  // strukturalnym (InsertDeleteConflict) odczekuje chwilę i ponawia (do 3 razy, z narastającą przerwą).
   async function withSessionRetry(fn){
-    try{
-      return await fn();
-    }catch(e){
-      if(isInvalidSessionError(e)){
-        WORKBOOK_SESSION_ID = null;
-        await ensureWorkbookSession();
+    var sessionRetried = false;
+    var conflictAttempts = 0;
+    while(true){
+      try{
         return await fn();
+      }catch(e){
+        if(isInvalidSessionError(e) && !sessionRetried){
+          sessionRetried = true;
+          WORKBOOK_SESSION_ID = null;
+          await ensureWorkbookSession();
+          continue;
+        }
+        if(isConflictError(e) && conflictAttempts<3){
+          conflictAttempts++;
+          await sleep(700*conflictAttempts);
+          continue;
+        }
+        throw e;
       }
-      throw e;
     }
   }
 
@@ -525,13 +546,57 @@
   // Wiersze tabel Excela nie mają trwałego ID (tylko zmienny index) — dlatego każdy rekord
   // trzyma własny GUID w kolumnie "Id", a przed każdą aktualizacją/usunięciem szukamy
   // aktualnego indeksu wiersza po tym GUID-zie.
+  //
+  // Żeby nie robić pełnego skanu całej tabeli przy KAŻDEJ operacji (co jest wolne przy większej
+  // liczbie klientów), trzymamy cache "id klienta -> ostatnio znany numer wiersza". Przed użyciem
+  // cache zawsze tanio weryfikujemy jednym zapytaniem, czy pod tym numerem wciąż jest właściwy
+  // klient (bo ktoś mógł w międzyczasie edytować plik ręcznie w Excelu) — jeśli nie, robimy pełny
+  // skan tylko wtedy.
+  var ROW_INDEX_CACHE = {};
+
+  function rebuildRowIndexCache(rows){
+    ROW_INDEX_CACHE = {};
+    rows.forEach(function(r){
+      var idVal = r.values[0][COLUMN_INDEX['id']];
+      if(idVal) ROW_INDEX_CACHE[String(idVal)] = r.index;
+    });
+  }
+
+  // Lżejsza wersja odbudowy cache: Excel/Graph API nie ma sposobu na "znajdź wiersz, gdzie
+  // kolumna Id = X" (nie wspiera filtrowania po wartości komórki) — jedyna droga to zawsze
+  // pobrać dane i przeszukać je po stronie aplikacji. Ale nie musimy do tego ściągać CAŁEJ
+  // tabeli ze wszystkimi kolumnami — wystarczy pobrać samą kolumnę "Id" (dużo mniejsza
+  // odpowiedź), a resztę (pełne dane wiersza) pobrać dopiero dla tego jednego, znalezionego wiersza.
+  async function rebuildRowIndexCacheFast(){
+    await ensureColumnMapping();
+    var idColIdx = COLUMN_INDEX['id'];
+    var col = await wbFetch(workbookPath()+"/tables('"+CONFIG.TABLE_NAME+"')/columns/itemAt(index="+idColIdx+")?$select=values");
+    var values = col.values || [];
+    var map = {};
+    // pierwszy wiersz to nagłówek kolumny — dane zaczynają się od indeksu 1, co odpowiada
+    // numerowi wiersza w tabeli 0, 1, 2, ...
+    for(var i=1;i<values.length;i++){
+      var idVal = values[i][0];
+      if(idVal!=null && idVal!=='') map[String(idVal)] = i-1;
+    }
+    ROW_INDEX_CACHE = map;
+  }
+
   async function getRowByEntityId(id){
     await ensureColumnMapping();
-    var rows = await fetchAllTableRows();
-    for(var i=0;i<rows.length;i++){
-      if(String(rows[i].values[0][COLUMN_INDEX['id']])===String(id)) return rows[i];
+
+    if(ROW_INDEX_CACHE[id] != null){
+      try{
+        var cachedRow = await wbFetch(tableRowsUrl()+'/itemAt(index='+ROW_INDEX_CACHE[id]+')');
+        if(cachedRow && cachedRow.values && String(cachedRow.values[0][COLUMN_INDEX['id']])===String(id)){
+          return cachedRow;
+        }
+      }catch(e){ /* cache nieaktualny (np. wiersz usunięty ręcznie) — spadamy do lekkiego wyszukania poniżej */ }
     }
-    return null;
+
+    await rebuildRowIndexCacheFast();
+    if(ROW_INDEX_CACHE[id] == null) return null;
+    return await wbFetch(tableRowsUrl()+'/itemAt(index='+ROW_INDEX_CACHE[id]+')');
   }
 
   // ---- mapowanie: wiersz tabeli Excel <-> obiekt klienta w aplikacji ----
@@ -557,7 +622,8 @@
   async function apiCreateClient(c){
     await ensureColumnMapping();
     c.id = c.id || uid('c');
-    await wbFetch(tableRowsUrl(), {method:'POST', body: JSON.stringify({values: clientToRowValues(c)})});
+    var newRow = await wbFetch(tableRowsUrl(), {method:'POST', body: JSON.stringify({values: clientToRowValues(c)})});
+    if(newRow && typeof newRow.index === 'number') ROW_INDEX_CACHE[c.id] = newRow.index;
     return c.id;
   }
   async function apiUpdateClientField(clientId, field, value){
@@ -572,6 +638,12 @@
     var row = await getRowByEntityId(clientId);
     if(!row) return;
     await wbFetch(tableRowsUrl()+'/itemAt(index='+row.index+')', {method:'DELETE'});
+    // usunięcie wiersza przesuwa wszystkie wiersze poniżej o jeden w górę — aktualizujemy cache,
+    // żeby kolejne operacje na innych klientach dalej trafiały we właściwy wiersz bez pełnego skanu
+    delete ROW_INDEX_CACHE[clientId];
+    Object.keys(ROW_INDEX_CACHE).forEach(function(id){
+      if(ROW_INDEX_CACHE[id] > row.index) ROW_INDEX_CACHE[id]--;
+    });
   }
   // Dopisuje datowaną linię tekstu do pola notatki/uwagi (zamiast osobnych wpisów jak w liście SharePoint —
   // tu to zwykła komórka tekstowa) i zapisuje w Excelu. Zwraca starą/nową wartość na potrzeby "Cofnij".
@@ -625,7 +697,8 @@
     var t=document.getElementById('toast');
     t.textContent=msg; t.classList.add('show');
     clearTimeout(showToast._tm);
-    showToast._tm=setTimeout(function(){ t.classList.remove('show'); },2200);
+    var duration = Math.min(7000, Math.max(2200, msg.length*55));
+    showToast._tm=setTimeout(function(){ t.classList.remove('show'); },duration);
   }
 
   function showConfirm(message, onYes, confirmLabel){
@@ -662,6 +735,7 @@
       await ensureWorkbookSession();
       await ensureColumnMapping();
       var rows = await fetchAllTableRows();
+      rebuildRowIndexCache(rows);
       state.clients = rows.map(function(r){ return rowToClient(r.values[0]); });
     }catch(e){
       console.error(e);
@@ -1020,7 +1094,14 @@
         logAction('client-delete', 'Usunięto klienta: '+name, {client:snapshot});
         render();
         showToast('Klient usunięty');
-      }catch(e){ console.error(e); showToast('Nie udało się usunąć klienta w pliku Excel'); }
+      }catch(e){
+        console.error(e);
+        if(isConflictError(e)){
+          showToast('Nie udało się usunąć klienta — plik jest prawdopodobnie otwarty w innym oknie/karcie Excela (lub ma aktywny filtr). Zamknij plik w Excelu i spróbuj ponownie.');
+        }else{
+          showToast('Nie udało się usunąć klienta w pliku Excel');
+        }
+      }
     }, 'Usuń klienta');
   }
 
@@ -1242,6 +1323,11 @@
 
   // ---- events ----
   document.getElementById('addClientBtn').addEventListener('click', addClient);
+  document.getElementById('refreshBtn').addEventListener('click', async function(){
+    showToast('Odświeżanie danych z Excela…');
+    await loadData();
+    showToast('Dane odświeżone');
+  });
   document.getElementById('historyBtn').addEventListener('click', function(){ state.historyOpen=true; renderHistory(); });
   document.getElementById('historyCloseBtn').addEventListener('click', function(){ state.historyOpen=false; renderHistory(); });
   document.getElementById('historyModalOverlay').addEventListener('click', function(e){
@@ -1375,6 +1461,7 @@
       WORKBOOK_SESSION_ID = null;
       COLUMN_INDEX = null;
       TOTAL_COLUMN_COUNT = 0;
+      ROW_INDEX_CACHE = {};
       state.clients = [];
       state.selectedId = null;
       state.editMode = false;
