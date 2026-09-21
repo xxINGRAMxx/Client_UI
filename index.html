@@ -105,7 +105,6 @@
 
   .info-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:16px;margin-bottom:16px;}
   .field label{display:block;font-size:11px;text-transform:uppercase;letter-spacing:.04em;color:var(--ink-faint);font-weight:600;margin-bottom:6px;}
-  .field-input-row{display:flex;align-items:center;gap:6px;}
   .field input{width:100%;padding:9px 11px;border:1px solid var(--line-strong);border-radius:7px;font-family:var(--sans);font-size:14px;color:var(--ink);background:#FDFDFD;}
   .field input:focus{outline:none;border-color:var(--teal);background:#fff;box-shadow:0 0 0 3px var(--teal-soft);}
   .field input:disabled{background:#F0F1F3;color:var(--ink-soft);cursor:not-allowed;border-color:var(--line);}
@@ -1047,7 +1046,7 @@
   function noteFullSection(client, field, label, extraClass){
     var text = client[field] || '';
     return '<div class="notes-col '+extraClass+'">'+
-      '<h3>'+label+(text?copyIconBtn(text):'')+'</h3>'+
+      '<h3>'+label+'</h3>'+
       '<textarea class="note-fulltext" data-field="'+field+'" data-client="'+client.id+'" '+(state.editMode?'':'readonly')+'>'+escapeHtml(text)+'</textarea>'+
       '<button class="btn btn-primary btn-sm" data-action="open-note-modal" data-client="'+client.id+'" data-field="'+field+'">+ Dodaj wpis</button>'+
       '<div class="note-hint">Dodawanie wpisu działa niezależnie od trybu edycji i pozwala wybrać datę wpisu. Pole powyżej możesz też edytować ręcznie po kliknięciu „Edytuj dane”.</div>'+
@@ -1112,11 +1111,8 @@
       var lockAttr = columnMissing ? ' disabled' : (state.editMode ? '' : ' readonly');
       var placeholder = columnMissing ? ' placeholder="(kolumna zostanie dodana wkrótce)"' : '';
       return '<div class="field"><label>'+label+(columnMissing?' <span style="color:var(--ink-faint);font-weight:400;text-transform:none;">— jeszcze niedostępne</span>':'')+'</label>'+
-        '<div class="field-input-row">'+
         '<input type="'+(type||'text')+'" data-field="'+name+'" data-client="'+cid+'" value="'+escapeHtml(value)+'"'+
-        (listId?' list="'+listId+'"':'')+placeholder+lockAttr+'>'+
-        copyIconBtn(value)+
-        '</div></div>';
+        (listId?' list="'+listId+'"':'')+placeholder+lockAttr+'></div>';
     }
 
     // scroll panel into view for newly created / opened client
