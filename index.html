@@ -55,6 +55,16 @@
   .search-box .icon{position:absolute;left:13px;top:50%;transform:translateY(-50%);width:15px;height:15px;color:var(--ink-faint);}
   .search-hint{font-size:11.5px;color:var(--ink-faint);margin:6px 2px 0;}
 
+  .filters-block{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin-bottom:4px;}
+  .filter-row{display:flex;align-items:center;gap:6px;background:var(--surface);border:1px solid var(--line-strong);border-radius:8px;padding:5px 6px;}
+  .filter-row select{border:none;background:transparent;font-family:var(--sans);font-size:12.5px;font-weight:600;color:var(--ink-soft);padding:2px 2px;cursor:pointer;}
+  .filter-row select:focus{outline:none;}
+  .filter-row input[type=text]{border:none;background:transparent;font-family:var(--sans);font-size:13px;padding:2px 4px;width:130px;color:var(--ink);}
+  .filter-row input[type=text]:focus{outline:none;}
+  .filter-row .filter-remove{background:none;border:none;color:var(--ink-faint);cursor:pointer;font-size:13px;padding:0 3px;line-height:1;}
+  .filter-row .filter-remove:hover{color:var(--red);}
+  .filters-actions{display:flex;gap:8px;}
+
   /* table */
   .roster{background:var(--surface);border:1px solid var(--line);border-radius:12px;overflow:hidden;}
   table{width:100%;border-collapse:collapse;font-size:13.5px;}
@@ -90,7 +100,7 @@
   .panel-close{background:transparent;border:none;cursor:pointer;color:var(--ink-faint);font-size:20px;line-height:1;padding:4px 8px;border-radius:6px;}
   .panel-close:hover{background:#EEF0F3;color:var(--ink);}
 
-  .info-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:16px;margin-bottom:8px;}
+  .info-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:16px;margin-bottom:16px;}
   .field label{display:block;font-size:11px;text-transform:uppercase;letter-spacing:.04em;color:var(--ink-faint);font-weight:600;margin-bottom:6px;}
   .field input{width:100%;padding:9px 11px;border:1px solid var(--line-strong);border-radius:7px;font-family:var(--sans);font-size:14px;color:var(--ink);background:#FDFDFD;}
   .field input:focus{outline:none;border-color:var(--teal);background:#fff;box-shadow:0 0 0 3px var(--teal-soft);}
@@ -106,14 +116,14 @@
   .divider{height:1px;background:var(--line);margin:24px 0;}
 
   .notes-grid{display:grid;grid-template-columns:1fr 1fr;gap:22px;}
-  @media (max-width:820px){.notes-grid{grid-template-columns:1fr;}.info-grid{grid-template-columns:repeat(2,1fr);}}
+  @media (max-width:820px){.notes-grid{grid-template-columns:1fr;}.info-grid{grid-template-columns:repeat(2,1fr) !important;}}
 
   .notes-col{border-radius:10px;padding:16px 16px 18px;}
-  .notes-col.notatki{background:var(--teal-soft);border:1px solid #CFE6E0;}
-  .notes-col.uwagi{background:var(--amber-soft);border:1px solid #EEDBB8;}
+  .notes-col.note-theme-a{background:var(--teal-soft);border:1px solid #CFE6E0;}
+  .notes-col.note-theme-b{background:var(--amber-soft);border:1px solid #EEDBB8;}
   .notes-col h3{margin:0 0 12px;font-size:13.5px;font-weight:700;display:flex;align-items:center;gap:7px;}
-  .notes-col.notatki h3{color:var(--teal);}
-  .notes-col.uwagi h3{color:var(--amber);}
+  .notes-col.note-theme-a h3{color:var(--teal);}
+  .notes-col.note-theme-b h3{color:var(--amber);}
 
   .note-fulltext{width:100%;min-height:130px;max-height:280px;padding:10px 11px;border:1px solid var(--line-strong);border-radius:8px;font-family:var(--sans);font-size:13px;line-height:1.5;background:#fff;resize:vertical;margin-bottom:10px;color:var(--ink);}
   .note-fulltext:focus{outline:none;border-color:var(--teal);}
@@ -225,6 +235,7 @@
       <input type="text" id="searchInput" placeholder="Szukaj po imieniu, nazwisku, opiekunie, telefonie lub e-mailu…">
     </div>
   </div>
+  <div id="filtersWrap"></div>
   <div class="search-hint" id="searchHint"></div>
 
   <div id="paginationWrap"></div>
@@ -298,14 +309,6 @@
   };
   // ================================================================
 
-  // Aplikacja NIE zakłada już konkretnej kolejności kolumn w Excelu — zamiast tego, przy
-  // każdym wczytaniu, odczytuje faktyczne nazwy nagłówków z tabeli i dopasowuje je do pól
-  // aplikacji po nazwie (patrz HEADER_NAME_MAP i ensureColumnMapping niżej). Dzięki temu
-  // kolejność kolumn w Excelu może być dowolna — liczy się tylko nazwa nagłówka.
-  var EXCEL_COLUMNS = ['id','opiekun','identyfikator','imie','nazwisko','kto','urodzony','wiek',
-    'adres','miejscowosc','kodPocztowy','email','telefony','ubezpieczajacy','uwagi','notatki',
-    'pierwszyAgent'];
-
   // Mapowanie: dokładna nazwa nagłówka kolumny w Excelu (pisownia dowolna wielkością liter,
   // białe znaki na początku/końcu ignorowane) -> nazwa pola używana w aplikacji.
   // Jeśli zmienisz nazwę nagłówka w Excelu, dopisz tu odpowiadający wpis.
@@ -331,23 +334,39 @@
     'ubezpieczajacy': 'ubezpieczajacy',
     'uwagi': 'uwagi',
     'notatki': 'notatki',
-    'pierwszy agent': 'pierwszyAgent'
+    'pierwszy agent': 'pierwszyAgent',
+    // Kolumna jeszcze nie istnieje w pliku Excel — zostanie dodana wkrótce. Gdy się pojawi,
+    // musi mieć nagłówek dokładnie "Obsługujący" (wielkość liter bez znaczenia), żeby
+    // aplikacja sama ją podłączyła bez dalszych zmian w kodzie.
+    'obsługujący': 'ktoObsluguje',
+    'obslugujacy': 'ktoObsluguje'
   };
   function normalizeHeader(s){
     return String(s||'').trim().toLowerCase().replace(/\s+/g,' ');
   }
 
   var FIELD_LABELS = {
-    identyfikator:'Identyfikator', imie:'Imię', nazwisko:'Nazwisko', kto:'Kto', urodzony:'Urodzony',
+    identyfikator:'Rodzina', imie:'Imię', nazwisko:'Nazwisko', kto:'Kto', urodzony:'Data Urodzenia',
     wiek:'Wiek', adres:'Adres', miejscowosc:'Miejscowość', kodPocztowy:'Kod pocztowy', email:'E-mail',
     telefony:'Telefony', ubezpieczajacy:'Ubezpieczający', uwagi:'Uwagi', notatki:'Notatki',
-    pierwszyAgent:'Pierwszy agent', opiekun:'Opiekun bazy'
+    pierwszyAgent:'Pierwszy agent', opiekun:'Opiekun bazy', ktoObsluguje:'Obsługujący'
   };
-  // Kolejność i podział pól widocznych w panelu szczegółów klienta (bez uwagi/notatki — mają własną sekcję)
-  var PANEL_FIELDS = ['imie','nazwisko','identyfikator','wiek','urodzony','kto','adres',
-    'miejscowosc','kodPocztowy','telefony','email','ubezpieczajacy','opiekun','pierwszyAgent'];
+  // Układ pól w panelu szczegółów klienta — tablica wierszy, każdy wiersz to osobny
+  // rząd w panelu z dokładnie tyloma polami, ile w nim wypisano (bez pól z NOTE_FIELDS —
+  // mają własną, osobną sekcję).
+  var PANEL_ROWS = [
+    ['imie','nazwisko','identyfikator','wiek'],
+    ['telefony','email','ubezpieczajacy','urodzony'],
+    ['miejscowosc','adres','kodPocztowy'],
+    ['ktoObsluguje','opiekun','pierwszyAgent']
+  ];
+  var PANEL_FIELDS = PANEL_ROWS.reduce(function(a,row){ return a.concat(row); }, []);
   // Pola dostępne do edycji zbiorczej (zaznacz wielu klientów naraz)
   var BULK_FIELDS = ['identyfikator','opiekun','pierwszyAgent'];
+  // Pola dostępne do filtrowania kolumnowego (wszystkie pola tekstowe klienta, poza samym ID)
+  var FILTERABLE_FIELDS = PANEL_FIELDS.concat(['notatki','uwagi']);
+  // Pola traktowane jako wolny tekst z dopisywaniem datowanych wpisów (dwie kolorowe sekcje w panelu)
+  var NOTE_FIELDS = ['notatki','uwagi'];
 
 
 
@@ -609,11 +628,30 @@
     });
     return [arr];
   }
+  // Jeśli kolumna w Excelu jest sformatowana jako Data (a nie Tekst), Graph API zwraca ją jako
+  // "surową" liczbę seryjną (dni od 30.12.1899), a nie jako czytelną datę — stąd wcześniejszy
+  // problem z wyświetlaniem liczby zamiast daty. Konwertujemy to na format DD.MM.RRRR.
+  function excelSerialToPolishDate(serial){
+    var ms = Math.round((Number(serial) - 25569) * 86400 * 1000);
+    var d = new Date(ms);
+    if(isNaN(d.getTime())) return String(serial);
+    var dd = String(d.getUTCDate()).padStart(2,'0');
+    var mm = String(d.getUTCMonth()+1).padStart(2,'0');
+    var yyyy = d.getUTCFullYear();
+    return dd+'.'+mm+'.'+yyyy;
+  }
+  function formatCellValue(field, raw){
+    if(raw==null || raw==='') return '';
+    if(field==='urodzony' && typeof raw==='number'){
+      return excelSerialToPolishDate(raw);
+    }
+    return String(raw);
+  }
   function rowToClient(v){
     var c = {};
     Object.keys(COLUMN_INDEX).forEach(function(field){
       var idx = COLUMN_INDEX[field];
-      c[field] = v[idx]!=null ? String(v[idx]) : '';
+      c[field] = formatCellValue(field, v[idx]);
     });
     return c;
   }
@@ -628,6 +666,9 @@
   }
   async function apiUpdateClientField(clientId, field, value){
     await ensureColumnMapping();
+    if(COLUMN_INDEX[field]==null){
+      throw new Error('Kolumna dla pola „'+(FIELD_LABELS[field]||field)+'" jeszcze nie istnieje w pliku Excel — dodaj ją, żeby móc zapisywać to pole.');
+    }
     var row = await getRowByEntityId(clientId);
     if(!row) throw new Error('Nie znaleziono klienta w arkuszu (Id='+clientId+')');
     var vals = row.values[0].slice();
@@ -661,7 +702,8 @@
   var LOG_KEY = 'actions_log';
   var PAGE_SIZE = 20;
   var state = { clients: [], selectedId: null, search: '', loaded: false, editMode: false,
-                selectedIds: new Set(), actionLog: [], bulkModalOpen: false, historyOpen: false, page: 1 };
+                selectedIds: new Set(), actionLog: [], bulkModalOpen: false, historyOpen: false, page: 1,
+                columnFilters: [] };
 
   var FAM_PALETTE = ['#0F6E5F','#C9862B','#5B6FA8','#B3432B','#7A5CA6','#2F8F7A','#B8823F','#4E7FB0'];
 
@@ -786,6 +828,17 @@
            (c.miejscowosc||'').toLowerCase().indexOf(q)>-1;
   }
 
+  // Filtry kolumnowe działają niezależnie od siebie i muszą być spełnione WSZYSTKIE naraz
+  // (logika ORAZ) — np. Imię = "Anna" ORAZ Nazwisko = "Kowalska" pokaże tylko Annę Kowalską.
+  // Pusta wartość filtra oznacza brak ograniczenia dla tej kolumny.
+  function matchesColumnFilters(c){
+    return state.columnFilters.every(function(f){
+      if(!f.value) return true;
+      var val = String(c[f.field]||'').toLowerCase();
+      return val.indexOf(f.value.toLowerCase())>-1;
+    });
+  }
+
   function distinctValues(field){
     var set={};
     state.clients.forEach(function(c){ if(c[field]) set[c[field]]=1; });
@@ -805,9 +858,14 @@
     var wrap = document.getElementById('rosterWrap');
     if(!state.loaded){ wrap.innerHTML = '<div class="loading">Wczytywanie danych…</div>'; document.getElementById('paginationWrap').innerHTML=''; return; }
 
-    var filtered = state.clients.filter(function(c){ return matchesSearch(c, state.search); });
-    document.getElementById('searchHint').textContent = state.search ?
-      (filtered.length+' wynik(ów) dla „'+state.search+'”') : '';
+    var filtered = state.clients.filter(function(c){ return matchesSearch(c, state.search) && matchesColumnFilters(c); });
+
+    var activeFilters = state.columnFilters.filter(function(f){ return f.value; });
+    var hintParts = [];
+    if(state.search) hintParts.push('szukane: „'+state.search+'”');
+    activeFilters.forEach(function(f){ hintParts.push((FIELD_LABELS[f.field]||f.field)+' = „'+f.value+'”'); });
+    document.getElementById('searchHint').textContent = hintParts.length ?
+      (filtered.length+' wynik(ów) — '+hintParts.join(', ')) : '';
 
     if(state.clients.length===0){
       wrap.innerHTML = '<div class="empty-state"><b>Brak klientów w bazie</b>Dodaj pierwszego klienta, aby rozpocząć.</div>';
@@ -815,7 +873,7 @@
       return;
     }
     if(filtered.length===0){
-      wrap.innerHTML = '<div class="empty-state"><b>Brak wyników</b>Spróbuj innego zapytania wyszukiwania.</div>';
+      wrap.innerHTML = '<div class="empty-state"><b>Brak wyników</b>Spróbuj innego zapytania wyszukiwania lub zresetuj filtry.</div>';
       document.getElementById('paginationWrap').innerHTML='';
       return;
     }
@@ -834,7 +892,7 @@
 
     var html = '<table><thead><tr>'+
       '<th class="chk-col"><input type="checkbox" id="selectAllChk" '+(allChecked?'checked':'')+'></th>'+
-      '<th>Klient</th><th>Wiek</th><th>Identyfikator</th><th>Miejscowość</th><th>Telefony</th><th>Opiekun</th>'+
+      '<th>Klient</th><th>Data urodzenia</th><th>Rodzina</th><th>Miejscowość</th><th>Telefony</th><th>Obsługujący</th><th>Opiekun</th>'+
       '</tr></thead><tbody>';
 
     pageItems.forEach(function(c){
@@ -845,10 +903,11 @@
       html += '<td class="chk-col"><input type="checkbox" data-role="row-select" data-id="'+c.id+'" '+(checked?'checked':'')+'></td>';
       html += '<td class="name-cell"><span class="fam-dot" style="background:'+(color||'transparent')+'"></span>'+
               escapeHtml(c.imie)+' '+escapeHtml(c.nazwisko)+'</td>';
-      html += '<td>'+(c.wiek ? escapeHtml(c.wiek) : '<span class="empty-cell">—</span>')+'</td>';
+      html += '<td>'+(c.urodzony ? escapeHtml(c.urodzony) : '<span class="empty-cell">—</span>')+'</td>';
       html += '<td>'+(c.identyfikator ? '<span class="fam-chip" style="background:'+color+'">'+escapeHtml(c.identyfikator)+'</span>' : '<span class="empty-cell">—</span>')+'</td>';
       html += '<td class="muted">'+(c.miejscowosc ? escapeHtml(c.miejscowosc) : '<span class="empty-cell">—</span>')+'</td>';
       html += '<td>'+(c.telefony ? escapeHtml(c.telefony) : '<span class="empty-cell">—</span>')+'</td>';
+      html += '<td>'+(c.ktoObsluguje ? escapeHtml(c.ktoObsluguje) : '<span class="empty-cell">—</span>')+'</td>';
       html += '<td>'+(c.opiekun ? escapeHtml(c.opiekun) : '<span class="empty-cell">—</span>')+'</td>';
       html += '</tr>';
     });
@@ -856,6 +915,56 @@
     wrap.innerHTML = html;
 
     renderPagination(filtered.length, totalPages, startIdx, pageItems.length);
+  }
+
+  // ---- filtry kolumnowe ----
+  function renderFilters(){
+    var wrap = document.getElementById('filtersWrap');
+
+    var rowsHtml = state.columnFilters.map(function(f){
+      var fieldOpts = FILTERABLE_FIELDS.map(function(key){
+        return '<option value="'+key+'"'+(key===f.field?' selected':'')+'>'+(FIELD_LABELS[key]||key)+'</option>';
+      }).join('');
+      var listId = 'filterList_'+f.id;
+      var dlOpts = distinctValues(f.field).map(function(o){ return '<option value="'+escapeHtml(o)+'">'; }).join('');
+      return '<div class="filter-row">'+
+        '<select data-role="filter-field" data-filter-id="'+f.id+'">'+fieldOpts+'</select>'+
+        '<input type="text" data-role="filter-value" data-filter-id="'+f.id+'" list="'+listId+'" value="'+escapeHtml(f.value)+'" placeholder="wartość…">'+
+        '<datalist id="'+listId+'">'+dlOpts+'</datalist>'+
+        '<button class="filter-remove" data-action="remove-filter" data-filter-id="'+f.id+'" title="Usuń ten filtr">✕</button>'+
+      '</div>';
+    }).join('');
+
+    var hasAny = state.columnFilters.length>0 || state.search;
+
+    wrap.innerHTML =
+      '<div class="filters-block">'+
+        rowsHtml+
+        '<div class="filters-actions">'+
+          '<button class="btn btn-ghost btn-sm" data-action="add-filter">+ Filtruj po kolumnie</button>'+
+          (hasAny ? '<button class="btn btn-ghost btn-sm" data-action="clear-filters">✕ Wyczyść wszystko</button>' : '')+
+        '</div>'+
+      '</div>';
+  }
+
+  function addColumnFilter(){
+    state.columnFilters.push({ id: uid('f'), field: FILTERABLE_FIELDS[0], value: '' });
+    renderFilters();
+    renderRoster();
+  }
+  function removeColumnFilter(filterId){
+    state.columnFilters = state.columnFilters.filter(function(f){ return f.id!==filterId; });
+    renderFilters();
+    renderRoster();
+  }
+  function clearAllFilters(){
+    state.columnFilters = [];
+    state.search = '';
+    var searchInput = document.getElementById('searchInput');
+    if(searchInput) searchInput.value = '';
+    state.page = 1;
+    renderFilters();
+    renderRoster();
   }
 
   function renderPagination(totalItems, totalPages, startIdx, shownCount){
@@ -911,9 +1020,12 @@
       return opts.map(function(o){ return '<option value="'+escapeHtml(o)+'">'; }).join('');
     }
 
-    var fieldsHtml = PANEL_FIELDS.map(function(f){
-      var listId = ['identyfikator','opiekun','pierwszyAgent'].indexOf(f)>-1 ? (f+'_'+client.id) : null;
-      return field(f, FIELD_LABELS[f], client[f], client.id, 'text', listId);
+    var rowsHtml = PANEL_ROWS.map(function(row){
+      var cellsHtml = row.map(function(f){
+        var listId = ['identyfikator','opiekun','pierwszyAgent'].indexOf(f)>-1 ? (f+'_'+client.id) : null;
+        return field(f, FIELD_LABELS[f], client[f], client.id, 'text', listId);
+      }).join('');
+      return '<div class="info-grid" style="grid-template-columns:repeat('+row.length+',1fr);">'+cellsHtml+'</div>';
     }).join('');
     var datalistsHtml = ['identyfikator','opiekun','pierwszyAgent'].map(function(f){
       return '<datalist id="'+f+'_'+client.id+'">'+dl(f)+'</datalist>';
@@ -934,24 +1046,27 @@
 
       (state.editMode ? '' : '<div class="lock-banner">🔒 Dane klienta są zablokowane przed przypadkową edycją — kliknij „Edytuj dane", aby je zmienić.</div>')+
 
-      '<div class="info-grid">'+ fieldsHtml + '</div>'+
+      rowsHtml+
       datalistsHtml+
 
       '<div class="divider"></div>'+
 
       '<div class="notes-grid">'+
-        noteFullSection(client,'notatki','Notatki','notatki')+
-        noteFullSection(client,'uwagi','Uwagi','uwagi')+
+        NOTE_FIELDS.map(function(f, i){
+          return noteFullSection(client, f, FIELD_LABELS[f]||f, i===0 ? 'note-theme-a' : 'note-theme-b');
+        }).join('')+
       '</div>'+
     '</div>';
 
     wrap.innerHTML = html;
 
     function field(name,label,value,cid,type,listId){
-      return '<div class="field"><label>'+label+'</label>'+
+      var columnMissing = COLUMN_INDEX && COLUMN_INDEX[name]==null;
+      var disabled = (!state.editMode || columnMissing) ? ' disabled' : '';
+      var placeholder = columnMissing ? ' placeholder="(kolumna zostanie dodana wkrótce)"' : '';
+      return '<div class="field"><label>'+label+(columnMissing?' <span style="color:var(--ink-faint);font-weight:400;text-transform:none;">— jeszcze niedostępne</span>':'')+'</label>'+
         '<input type="'+(type||'text')+'" data-field="'+name+'" data-client="'+cid+'" value="'+escapeHtml(value)+'"'+
-        (listId?' list="'+listId+'"':'')+
-        (state.editMode?'':' disabled')+'></div>';
+        (listId?' list="'+listId+'"':'')+placeholder+disabled+'></div>';
     }
 
     // scroll panel into view for newly created / opened client
@@ -968,6 +1083,7 @@
         '<div class="bulk-actions">'+
           '<button class="btn btn-sm btn-clear" data-action="clear-selection">Wyczyść zaznaczenie</button>'+
           '<button class="btn btn-sm btn-light" data-action="open-bulk-modal">Edytuj zaznaczonych</button>'+
+          '<button class="btn btn-sm" style="background:var(--red);color:#fff;" data-action="bulk-delete">Usuń zaznaczonych</button>'+
         '</div>'+
       '</div>';
   }
@@ -1009,12 +1125,13 @@
 
         '<div class="divider" style="margin:0 0 20px;"></div>'+
 
-        '<p class="section-label">Dopisz ten sam wpis do Notatek/Uwag wszystkich zaznaczonych</p>'+
+        '<p class="section-label">Dopisz ten sam wpis do wszystkich zaznaczonych</p>'+
         '<div class="bulk-note-form">'+
           '<div class="row-inline" style="display:flex;gap:10px;align-items:center;">'+
             '<div class="type-toggle">'+
-              '<label><input type="radio" name="bulkNoteType" value="notatki" checked> Notatka</label>'+
-              '<label><input type="radio" name="bulkNoteType" value="uwagi"> Uwaga</label>'+
+              NOTE_FIELDS.map(function(f, i){
+                return '<label><input type="radio" name="bulkNoteType" value="'+f+'"'+(i===0?' checked':'')+'> '+(FIELD_LABELS[f]||f)+'</label>';
+              }).join('')+
             '</div>'+
             '<input type="date" id="bulkNoteDate" value="'+todayISO()+'" style="font-family:var(--mono);font-size:12.5px;padding:8px;border:1px solid var(--line-strong);border-radius:7px;">'+
           '</div>'+
@@ -1068,8 +1185,9 @@
   }
 
   async function addClient(){
+    await ensureColumnMapping();
     var c = { id:null };
-    EXCEL_COLUMNS.forEach(function(f){ if(f!=='id') c[f]=''; });
+    Object.keys(COLUMN_INDEX).forEach(function(f){ if(f!=='id') c[f]=''; });
     try{
       c.id = await apiCreateClient(c);
       state.clients.push(c);
@@ -1105,6 +1223,43 @@
     }, 'Usuń klienta');
   }
 
+  function bulkDeleteClients(){
+    var ids = Array.from(state.selectedIds);
+    var clients = ids.map(getClient).filter(Boolean);
+    if(clients.length===0) return;
+
+    var preview = clients.slice(0,3).map(clientLabel).join(', ') + (clients.length>3 ? ' i '+(clients.length-3)+' więcej' : '');
+    showConfirm('Usunąć '+clients.length+' zaznaczonych klientów ('+preview+') z bazy? Tej operacji nie można cofnąć.', async function(){
+      var snapshots = [];
+      var deletedIds = [];
+      for(var i=0;i<clients.length;i++){
+        var c = clients[i];
+        try{
+          await apiDeleteClient(c.id);
+          snapshots.push(JSON.parse(JSON.stringify(c)));
+          deletedIds.push(c.id);
+        }catch(e){
+          console.error(e);
+          if(isConflictError(e)){
+            showToast('Zatrzymano usuwanie — plik jest prawdopodobnie otwarty w innym oknie/karcie Excela. Zamknij go i spróbuj ponownie.');
+            break;
+          }else{
+            showToast('Błąd usuwania klienta: '+clientLabel(c));
+          }
+        }
+      }
+
+      if(deletedIds.length){
+        state.clients = state.clients.filter(function(x){ return deletedIds.indexOf(x.id)===-1; });
+        deletedIds.forEach(function(id){ state.selectedIds.delete(id); });
+        if(deletedIds.indexOf(state.selectedId)>-1){ state.selectedId=null; state.editMode=false; }
+        logAction('bulk-delete', 'Usunięto zbiorczo '+deletedIds.length+' klientów: '+preview, {clients:snapshots});
+        render();
+        showToast('Usunięto '+deletedIds.length+' klientów');
+      }
+    }, 'Usuń zaznaczonych');
+  }
+
   function updateField(clientId, field, value){
     var c = getClient(clientId);
     if(!c) return;
@@ -1122,15 +1277,16 @@
       c[field] = oldValue; // cofnij zmianę lokalnie, jeśli zapis się nie powiódł
       renderRoster();
       renderPanel();
-      showToast('Nie udało się zapisać zmiany w pliku Excel');
+      showToast(e && e.message ? e.message : 'Nie udało się zapisać zmiany w pliku Excel');
     });
   }
 
   function openNoteModal(clientId, field){
     var box = document.getElementById('noteModalBox');
     var overlay = document.getElementById('noteModalOverlay');
-    var titleLabel = field==='notatki' ? 'Dodaj notatkę' : 'Dodaj uwagę';
-    var placeholderLabel = field==='notatki' ? 'notatki' : 'uwagi';
+    var fieldLabel = FIELD_LABELS[field] || field;
+    var titleLabel = 'Dodaj wpis: '+fieldLabel;
+    var placeholderLabel = fieldLabel.toLowerCase();
     box.innerHTML =
       '<div class="modal-head"><h3>'+titleLabel+'</h3>'+
         '<button class="panel-close" data-action="close-note-modal" title="Zamknij">✕</button></div>'+
@@ -1237,7 +1393,7 @@
 
   async function applyBulkNote(){
     var box = document.getElementById('bulkModalBox');
-    var noteType = box.querySelector('input[name="bulkNoteType"]:checked').value; // 'notatki' lub 'uwagi'
+    var noteType = box.querySelector('input[name="bulkNoteType"]:checked').value; // jedna z wartości NOTE_FIELDS
     var dateEl = box.querySelector('#bulkNoteDate');
     var date = (dateEl && dateEl.value) || todayISO();
     var textEl = box.querySelector('#bulkNoteText');
@@ -1256,7 +1412,7 @@
     }
 
     if(changes.length){
-      logAction('bulk-update', 'Dopisano '+(noteType==='notatki'?'notatkę':'uwagę')+' dla '+changes.length+' klientów', {changes:changes});
+      logAction('bulk-update', 'Dopisano wpis („'+(FIELD_LABELS[noteType]||noteType)+'") dla '+changes.length+' klientów', {changes:changes});
     }
     render();
     showToast('Dodano wpis do '+changes.length+' klientów');
@@ -1290,6 +1446,15 @@
           var newId = await apiCreateClient(p.client);
           p.client.id = newId;
           state.clients.push(p.client);
+          break;
+        }
+        case 'bulk-delete': {
+          for(var k=0;k<p.clients.length;k++){
+            var cl = p.clients[k];
+            var restoredId = await apiCreateClient(cl);
+            cl.id = restoredId;
+            state.clients.push(cl);
+          }
           break;
         }
         case 'bulk-update': {
@@ -1375,13 +1540,31 @@
     else if(action==='save-bulk-fields'){ applyBulkFields(); }
     else if(action==='save-bulk-note'){ applyBulkNote(); }
     else if(action==='undo-action'){ undoAction(actionEl.getAttribute('data-action-id')); }
+    else if(action==='add-filter'){ addColumnFilter(); }
+    else if(action==='remove-filter'){ removeColumnFilter(actionEl.getAttribute('data-filter-id')); }
+    else if(action==='clear-filters'){ clearAllFilters(); }
+    else if(action==='bulk-delete'){ bulkDeleteClients(); }
     else if(action==='goto-page'){
       var p = parseInt(actionEl.getAttribute('data-page'),10);
       if(!isNaN(p)){ state.page = p; renderRoster(); }
     }
   });
 
+  document.body.addEventListener('input', function(e){
+    if(e.target.matches('[data-role="filter-value"]')){
+      var fid = e.target.getAttribute('data-filter-id');
+      var filter = state.columnFilters.find(function(f){ return f.id===fid; });
+      if(filter){ filter.value = e.target.value; renderRoster(); }
+    }
+  });
+
   document.body.addEventListener('change', function(e){
+    if(e.target.matches('[data-role="filter-field"]')){
+      var fid = e.target.getAttribute('data-filter-id');
+      var filter = state.columnFilters.find(function(f){ return f.id===fid; });
+      if(filter){ filter.field = e.target.value; filter.value=''; renderFilters(); renderRoster(); }
+      return;
+    }
     if(e.target.matches('[data-role="bulk-apply"]')){
       var f = e.target.getAttribute('data-field');
       var input = document.querySelector('[data-role="bulk-value"][data-field="'+f+'"]');
@@ -1474,6 +1657,7 @@
 
   (function init(){
     document.querySelector('.wrap').style.display = 'none';
+    renderFilters();
     var accounts = msalInstance.getAllAccounts();
     if(accounts.length){
       currentAccount = accounts[0];
