@@ -105,10 +105,19 @@
 
   .info-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:16px;margin-bottom:16px;}
   .field label{display:block;font-size:11px;text-transform:uppercase;letter-spacing:.04em;color:var(--ink-faint);font-weight:600;margin-bottom:6px;}
+  .field-input-row{display:flex;align-items:center;gap:6px;}
   .field input{width:100%;padding:9px 11px;border:1px solid var(--line-strong);border-radius:7px;font-family:var(--sans);font-size:14px;color:var(--ink);background:#FDFDFD;}
   .field input:focus{outline:none;border-color:var(--teal);background:#fff;box-shadow:0 0 0 3px var(--teal-soft);}
   .field input:disabled{background:#F0F1F3;color:var(--ink-soft);cursor:not-allowed;border-color:var(--line);}
+  .field input:read-only{background:#F0F1F3;color:var(--ink);cursor:text;border-color:var(--line);}
+  .field input:read-only:focus{box-shadow:none;border-color:var(--line);background:#F0F1F3;}
   .field.wide{grid-column:span 2;}
+
+  .copy-btn{flex:none;width:28px;height:28px;border:1px solid var(--line-strong);background:#fff;color:var(--ink-soft);border-radius:6px;cursor:pointer;font-size:13px;display:flex;align-items:center;justify-content:center;transition:background .1s,color .1s;}
+  .copy-btn:hover{background:var(--teal-soft);color:var(--teal);border-color:var(--teal);}
+  .cell-copy{display:inline-flex;align-items:center;gap:6px;}
+  .cell-copy .copy-btn{width:22px;height:22px;font-size:11.5px;opacity:.55;}
+  .cell-copy .copy-btn:hover{opacity:1;}
 
   .edit-toggle{display:flex;align-items:center;gap:7px;}
   .edit-toggle.is-locked{color:var(--ink-soft);}
@@ -124,13 +133,14 @@
   .notes-col{border-radius:10px;padding:16px 16px 18px;}
   .notes-col.note-theme-a{background:var(--teal-soft);border:1px solid #CFE6E0;}
   .notes-col.note-theme-b{background:var(--amber-soft);border:1px solid #EEDBB8;}
-  .notes-col h3{margin:0 0 12px;font-size:13.5px;font-weight:700;display:flex;align-items:center;gap:7px;}
+  .notes-col h3{margin:0 0 12px;font-size:13.5px;font-weight:700;display:flex;align-items:center;gap:7px;justify-content:space-between;}
   .notes-col.note-theme-a h3{color:var(--teal);}
   .notes-col.note-theme-b h3{color:var(--amber);}
 
   .note-fulltext{width:100%;min-height:130px;max-height:280px;padding:10px 11px;border:1px solid var(--line-strong);border-radius:8px;font-family:var(--sans);font-size:13px;line-height:1.5;background:#fff;resize:vertical;margin-bottom:10px;color:var(--ink);}
   .note-fulltext:focus{outline:none;border-color:var(--teal);}
   .note-fulltext:disabled{background:rgba(255,255,255,.55);color:var(--ink-soft);cursor:not-allowed;}
+  .note-fulltext:read-only{background:rgba(255,255,255,.75);color:var(--ink);cursor:text;}
 
   .note-form{display:flex;gap:8px;align-items:flex-start;}
   .note-form textarea{flex:1;resize:vertical;min-height:38px;max-height:100px;padding:8px 10px;border:1px solid var(--line-strong);border-radius:7px;font-family:var(--sans);font-size:13px;background:#fff;}
@@ -746,6 +756,32 @@
     showToast._tm=setTimeout(function(){ t.classList.remove('show'); },duration);
   }
 
+  // Kopiuje wartość do schowka. navigator.clipboard wymaga bezpiecznego kontekstu (https) —
+  // GitHub Pages to spełnia — ale dla pewności ma zapasową metodę na starsze przeglądarki.
+  async function copyToClipboard(value){
+    if(!value) return;
+    try{
+      await navigator.clipboard.writeText(value);
+    }catch(e){
+      try{
+        var tmp = document.createElement('textarea');
+        tmp.value = value;
+        tmp.style.position='fixed'; tmp.style.opacity='0';
+        document.body.appendChild(tmp);
+        tmp.select();
+        document.execCommand('copy');
+        document.body.removeChild(tmp);
+      }catch(e2){ console.error(e2); showToast('Nie udało się skopiować'); return; }
+    }
+    showToast('Skopiowano do schowka');
+  }
+  // Mały przycisk-ikona do jednoklikowego kopiowania wartości — używany w widoku głównym
+  // i w panelu klienta. Zwraca pusty string, gdy nie ma czego kopiować.
+  function copyIconBtn(value){
+    if(!value) return '';
+    return '<button type="button" class="copy-btn" data-action="copy-value" data-copy-value="'+escapeHtml(value)+'" title="Kopiuj">⧉</button>';
+  }
+
   function showConfirm(message, onYes, confirmLabel){
     var overlay = document.getElementById('confirmOverlay');
     var yesBtn = document.getElementById('confirmYes');
@@ -909,8 +945,8 @@
       html += '<td>'+(c.wiek ? escapeHtml(c.wiek) : '<span class="empty-cell">—</span>')+'</td>';
       html += '<td>'+(c.identyfikator ? '<span class="fam-chip" style="background:'+color+'">'+escapeHtml(c.identyfikator)+'</span>' : '<span class="empty-cell">—</span>')+'</td>';
       html += '<td class="muted">'+(c.miejscowosc ? escapeHtml(c.miejscowosc) : '<span class="empty-cell">—</span>')+'</td>';
-      html += '<td>'+(c.telefony ? escapeHtml(c.telefony) : '<span class="empty-cell">—</span>')+'</td>';
-      html += '<td>'+(c.email ? escapeHtml(c.email) : '<span class="empty-cell">—</span>')+'</td>';
+      html += '<td>'+(c.telefony ? '<span class="cell-copy">'+escapeHtml(c.telefony)+copyIconBtn(c.telefony)+'</span>' : '<span class="empty-cell">—</span>')+'</td>';
+      html += '<td>'+(c.email ? '<span class="cell-copy">'+escapeHtml(c.email)+copyIconBtn(c.email)+'</span>' : '<span class="empty-cell">—</span>')+'</td>';
       html += '<td>'+(c.ktoObsluguje ? escapeHtml(c.ktoObsluguje) : '<span class="empty-cell">—</span>')+'</td>';
       html += '<td>'+(c.opiekun ? escapeHtml(c.opiekun) : '<span class="empty-cell">—</span>')+'</td>';
       html += '</tr>';
@@ -1011,8 +1047,8 @@
   function noteFullSection(client, field, label, extraClass){
     var text = client[field] || '';
     return '<div class="notes-col '+extraClass+'">'+
-      '<h3>'+label+'</h3>'+
-      '<textarea class="note-fulltext" data-field="'+field+'" data-client="'+client.id+'" '+(state.editMode?'':'disabled')+'>'+escapeHtml(text)+'</textarea>'+
+      '<h3>'+label+(text?copyIconBtn(text):'')+'</h3>'+
+      '<textarea class="note-fulltext" data-field="'+field+'" data-client="'+client.id+'" '+(state.editMode?'':'readonly')+'>'+escapeHtml(text)+'</textarea>'+
       '<button class="btn btn-primary btn-sm" data-action="open-note-modal" data-client="'+client.id+'" data-field="'+field+'">+ Dodaj wpis</button>'+
       '<div class="note-hint">Dodawanie wpisu działa niezależnie od trybu edycji i pozwala wybrać datę wpisu. Pole powyżej możesz też edytować ręcznie po kliknięciu „Edytuj dane”.</div>'+
     '</div>';
@@ -1070,11 +1106,17 @@
 
     function field(name,label,value,cid,type,listId){
       var columnMissing = COLUMN_INDEX && COLUMN_INDEX[name]==null;
-      var disabled = (!state.editMode || columnMissing) ? ' disabled' : '';
+      // "readonly" (nie "disabled") gdy pole jest tylko zablokowane przed edycją — dzięki temu
+      // dalej można zaznaczyć tekst i skopiować (disabled blokuje też zaznaczanie w przeglądarkach).
+      // "disabled" zostaje tylko dla pól, których kolumna w ogóle jeszcze nie istnieje w Excelu.
+      var lockAttr = columnMissing ? ' disabled' : (state.editMode ? '' : ' readonly');
       var placeholder = columnMissing ? ' placeholder="(kolumna zostanie dodana wkrótce)"' : '';
       return '<div class="field"><label>'+label+(columnMissing?' <span style="color:var(--ink-faint);font-weight:400;text-transform:none;">— jeszcze niedostępne</span>':'')+'</label>'+
+        '<div class="field-input-row">'+
         '<input type="'+(type||'text')+'" data-field="'+name+'" data-client="'+cid+'" value="'+escapeHtml(value)+'"'+
-        (listId?' list="'+listId+'"':'')+placeholder+disabled+'></div>';
+        (listId?' list="'+listId+'"':'')+placeholder+lockAttr+'>'+
+        copyIconBtn(value)+
+        '</div></div>';
     }
 
     // scroll panel into view for newly created / opened client
@@ -1526,6 +1568,15 @@
     }
     if(e.target.id==='selectAllChk'){
       toggleSelectAll();
+      return;
+    }
+
+    // Kopiowanie musi być sprawdzone PRZED nawigacją do panelu klienta — przycisk kopiowania
+    // może siedzieć wewnątrz wiersza tabeli (.client-row) albo pola w panelu, więc bez tego
+    // kliknięcie w niego wywołałoby też otwarcie/przejście, którego nie chcemy.
+    var copyBtn = e.target.closest('[data-action="copy-value"]');
+    if(copyBtn){
+      copyToClipboard(copyBtn.getAttribute('data-copy-value'));
       return;
     }
 
