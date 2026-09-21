@@ -90,6 +90,9 @@
   .page-btn:disabled{opacity:.4;cursor:not-allowed;}
   .page-btn.active{background:var(--teal);border-color:var(--teal);color:#fff;font-weight:600;}
   .page-ellipsis{padding:0 4px;color:var(--ink-faint);}
+  .goto-page-form{display:flex;align-items:center;gap:6px;margin-left:8px;padding-left:10px;border-left:1px solid var(--line-strong);}
+  .goto-page-form input{width:64px;padding:6px 8px;border:1px solid var(--line-strong);border-radius:6px;font-family:var(--mono);font-size:12.5px;}
+  .goto-page-form input:focus{outline:none;border-color:var(--teal);}
 
   /* detail panel */
   .panel{margin-top:22px;background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:26px 28px 30px;animation:rise .18s ease;}
@@ -355,8 +358,8 @@
   // rząd w panelu z dokładnie tyloma polami, ile w nim wypisano (bez pól z NOTE_FIELDS —
   // mają własną, osobną sekcję).
   var PANEL_ROWS = [
-    ['imie','nazwisko','identyfikator','wiek'],
-    ['telefony','email','ubezpieczajacy','urodzony'],
+    ['imie','nazwisko','identyfikator','urodzony'],
+    ['telefony','email','ubezpieczajacy','wiek'],
     ['miejscowosc','adres','kodPocztowy'],
     ['ktoObsluguje','opiekun','pierwszyAgent']
   ];
@@ -892,7 +895,7 @@
 
     var html = '<table><thead><tr>'+
       '<th class="chk-col"><input type="checkbox" id="selectAllChk" '+(allChecked?'checked':'')+'></th>'+
-      '<th>Klient</th><th>Data urodzenia</th><th>Rodzina</th><th>Miejscowość</th><th>Telefony</th><th>Obsługujący</th><th>Opiekun</th>'+
+      '<th>Klient</th><th>Wiek</th><th>Rodzina</th><th>Miejscowość</th><th>Telefony</th><th>E-mail</th><th>Obsługujący</th><th>Opiekun</th>'+
       '</tr></thead><tbody>';
 
     pageItems.forEach(function(c){
@@ -903,10 +906,11 @@
       html += '<td class="chk-col"><input type="checkbox" data-role="row-select" data-id="'+c.id+'" '+(checked?'checked':'')+'></td>';
       html += '<td class="name-cell"><span class="fam-dot" style="background:'+(color||'transparent')+'"></span>'+
               escapeHtml(c.imie)+' '+escapeHtml(c.nazwisko)+'</td>';
-      html += '<td>'+(c.urodzony ? escapeHtml(c.urodzony) : '<span class="empty-cell">—</span>')+'</td>';
+      html += '<td>'+(c.wiek ? escapeHtml(c.wiek) : '<span class="empty-cell">—</span>')+'</td>';
       html += '<td>'+(c.identyfikator ? '<span class="fam-chip" style="background:'+color+'">'+escapeHtml(c.identyfikator)+'</span>' : '<span class="empty-cell">—</span>')+'</td>';
       html += '<td class="muted">'+(c.miejscowosc ? escapeHtml(c.miejscowosc) : '<span class="empty-cell">—</span>')+'</td>';
       html += '<td>'+(c.telefony ? escapeHtml(c.telefony) : '<span class="empty-cell">—</span>')+'</td>';
+      html += '<td>'+(c.email ? escapeHtml(c.email) : '<span class="empty-cell">—</span>')+'</td>';
       html += '<td>'+(c.ktoObsluguje ? escapeHtml(c.ktoObsluguje) : '<span class="empty-cell">—</span>')+'</td>';
       html += '<td>'+(c.opiekun ? escapeHtml(c.opiekun) : '<span class="empty-cell">—</span>')+'</td>';
       html += '</tr>';
@@ -996,6 +1000,10 @@
           '<button class="page-btn" data-action="goto-page" data-page="'+(page-1)+'" '+(page<=1?'disabled':'')+'>‹</button>'+
           btnsHtml+
           '<button class="page-btn" data-action="goto-page" data-page="'+(page+1)+'" '+(page>=totalPages?'disabled':'')+'>›</button>'+
+          '<span class="goto-page-form">'+
+            '<input type="number" id="gotoPageInput" min="1" max="'+totalPages+'" data-total-pages="'+totalPages+'" placeholder="nr strony">'+
+            '<button class="page-btn" data-action="goto-page-input">Idź</button>'+
+          '</span>'+
         '</div>'+
       '</div>';
   }
@@ -1548,7 +1556,21 @@
       var p = parseInt(actionEl.getAttribute('data-page'),10);
       if(!isNaN(p)){ state.page = p; renderRoster(); }
     }
+    else if(action==='goto-page-input'){
+      goToTypedPage();
+    }
   });
+
+  function goToTypedPage(){
+    var input = document.getElementById('gotoPageInput');
+    if(!input) return;
+    var totalPages = parseInt(input.getAttribute('data-total-pages'),10) || 1;
+    var p = parseInt(input.value,10);
+    if(isNaN(p)) return;
+    p = Math.max(1, Math.min(totalPages, p));
+    state.page = p;
+    renderRoster();
+  }
 
   document.body.addEventListener('input', function(e){
     if(e.target.matches('[data-role="filter-value"]')){
@@ -1576,6 +1598,10 @@
   });
 
   document.body.addEventListener('keydown', function(e){
+    if(e.target.id==='gotoPageInput' && e.key==='Enter'){
+      e.preventDefault();
+      goToTypedPage();
+    }
     if(e.key==='Escape'){
       if(state.historyOpen){ state.historyOpen=false; renderHistory(); }
       if(state.bulkModalOpen){ closeBulkModal(); }
